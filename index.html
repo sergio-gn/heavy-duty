@@ -6,16 +6,19 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html,body { height:100%; margin:0; background:#111; }
-    #container { width:100%; height:100vh; overflow:hidden; }
+    #container { width:100%; height:100vh; overflow:hidden; touch-action: none; } /* touch-action none prevents browser panning while dragging */
     .hint {
       position: absolute; top:12px; left:12px; color:#fff; font-family:Arial,Helvetica,sans-serif;
       background: rgba(0,0,0,0.4); padding:8px 10px; border-radius:6px; font-size:13px;
+      z-index: 2;
     }
+    /* ensure canvas covers container */
+    canvas { display:block; width:100%; height:100%; }
   </style>
 </head>
 <body>
   <div id="container"></div>
-  <div class="hint">Clique e arraste para girar • Scroll para dar zoom</div>
+  <div class="hint">Clique e arraste para girar • Faça movimento de pinça do celular / Roda do mouse para dar zoom</div>
 
   <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
   <script>
@@ -35,45 +38,117 @@
       renderer.setSize(container.clientWidth, container.clientHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.outputEncoding = THREE.sRGBEncoding;
+      // Enable shadow map for rim/edge shadows
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       container.appendChild(renderer.domElement);
 
       // Lights
-      scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.6));
-      const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-      dir.position.set(2, 4, 1);
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x222233, 0.6);
+      scene.add(hemi);
+
+      const dir = new THREE.DirectionalLight(0xffffff, 0.5);
+      dir.position.set(3, 4, 2);
+      dir.castShadow = true;
+      dir.shadow.bias = -0.0005;
+      dir.shadow.mapSize.width = 1024;
+      dir.shadow.mapSize.height = 1024;
       scene.add(dir);
 
-      // Manual mouse controls
-      let isMouseDown = false;
-      let mouseX = 0;
-      let mouseY = 0;
+      // subtle spotlight to accent the rim
+      const spot = new THREE.SpotLight(0xffffff, 0.6, 10, Math.PI / 6, 0.3);
+      spot.position.set(-2, 2.5, 3);
+      spot.castShadow = true;
+      spot.shadow.bias = -0.0005;
+      spot.shadow.mapSize.width = 1024;
+      spot.shadow.mapSize.height = 1024;
+      scene.add(spot);
+
+      // Controls state (pointer-based so it works on phone)
+      let isPointerDown = false;
+      let pointerId = null;
+      let startX = 0;
+      let startY = 0;
       let rotationX = 0;
       let rotationY = 0;
 
-      renderer.domElement.addEventListener('mousedown', (event) => {
-        isMouseDown = true;
-        mouseX = event.clientX;
-        mouseY = event.clientY;
-      });
-      renderer.domElement.addEventListener('mousemove', (event) => {
-        if (isMouseDown) {
-          const deltaX = event.clientX - mouseX;
-          const deltaY = event.clientY - mouseY;
-          rotationY += deltaX * 0.01;
-          rotationX += deltaY * 0.01;
-          mouseX = event.clientX;
-          mouseY = event.clientY;
+      // Use pointer events (works for mouse and touch and pen)
+      container.addEventListener('pointerdown', (e) => {
+        // only left button or touch/pen
+        if (e.isPrimary) {
+          isPointerDown = true;
+          pointerId = e.pointerId;
+          startX = e.clientX;
+          startY = e.clientY;
+          container.setPointerCapture(pointerId);
         }
       });
-      renderer.domElement.addEventListener('mouseup', () => { isMouseDown = false; });
 
-      // Zoom
-      renderer.domElement.addEventListener('wheel', (event) => {
+      container.addEventListener('pointermove', (e) => {
+        if (!isPointerDown || e.pointerId !== pointerId) return;
+        const deltaX = e.clientX - startX;
+        const deltaY = e.clientY - startY;
+        rotationY += deltaX * 0.01;
+        rotationX += deltaY * 0.01;
+        startX = e.clientX;
+        startY = e.clientY;
+      });
+
+      container.addEventListener('pointerup', (e) => {
+        if (e.pointerId === pointerId) {
+          isPointerDown = false;
+          try { container.releasePointerCapture(pointerId); } catch (err) {}
+          pointerId = null;
+        }
+      });
+
+      container.addEventListener('pointercancel', (e) => {
+        if (e.pointerId === pointerId) {
+          isPointerDown = false;
+          try { container.releasePointerCapture(pointerId); } catch (err) {}
+          pointerId = null;
+        }
+      });
+
+      // Two-finger pinch zoom (touch)
+      let lastTouchDist = null;
+      container.addEventListener('touchstart', (ev) => {
+        if (ev.touches && ev.touches.length === 2) {
+          lastTouchDist = getTouchDist(ev.touches[0], ev.touches[1]);
+        }
+      }, { passive: false });
+
+      container.addEventListener('touchmove', (ev) => {
+        if (ev.touches && ev.touches.length === 2) {
+          ev.preventDefault(); // prevent page scroll
+          const d = getTouchDist(ev.touches[0], ev.touches[1]);
+          if (lastTouchDist !== null) {
+            const diff = d - lastTouchDist;
+            camera.position.z -= diff * 0.005; // zoom sensitivity
+            camera.position.z = Math.max(1, Math.min(10, camera.position.z));
+          }
+          lastTouchDist = d;
+        }
+      }, { passive: false });
+
+      container.addEventListener('touchend', (ev) => {
+        if (!ev.touches || ev.touches.length < 2) lastTouchDist = null;
+      });
+
+      function getTouchDist(a, b) {
+        const dx = a.clientX - b.clientX;
+        const dy = a.clientY - b.clientY;
+        return Math.sqrt(dx*dx + dy*dy);
+      }
+
+      // Mouse wheel zoom (desktop)
+      container.addEventListener('wheel', (event) => {
+        event.preventDefault();
         const zoomSpeed = 0.1;
         const delta = event.deltaY > 0 ? 1 : -1;
         camera.position.z += delta * zoomSpeed;
         camera.position.z = Math.max(1, Math.min(10, camera.position.z));
-      });
+      }, { passive: false });
 
       // CD parameters
       const RADIUS = 1.0;
@@ -86,35 +161,54 @@
         loadedTexture.magFilter = THREE.LinearFilter;
         loadedTexture.minFilter = THREE.LinearMipmapLinearFilter;
         loadedTexture.generateMipmaps = true;
+        // anisotropy: use max available (helps at glancing angles)
         loadedTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
         loadedTexture.wrapS = THREE.ClampToEdgeWrapping;
         loadedTexture.wrapT = THREE.ClampToEdgeWrapping;
       });
 
-      // Create a single CD mesh
-      const cdGeom = new THREE.CylinderGeometry(RADIUS, RADIUS, THICKNESS, 128, 1, false);
+      // Main CD: cylinder with caps (caps get the texture)
+      const cdGeom = new THREE.CylinderGeometry(RADIUS, RADIUS, THICKNESS, 256, 1, false);
+      // ensure UVs are decent for caps — CylinderGeometry already gives caps UVs
       const cdMat = new THREE.MeshStandardMaterial({
         map: texture,
         roughness: 0.4,
-        metalness: 0.3
+        metalness: 0.3,
+        // show both sides of the caps correctly
+        side: THREE.DoubleSide
       });
       const cdMesh = new THREE.Mesh(cdGeom, cdMat);
-      cdMesh.rotation.x = Math.PI / 2;
+      cdMesh.rotation.x = Math.PI / 2; // lay flat
+      cdMesh.castShadow = false;
+      cdMesh.receiveShadow = true;
       scene.add(cdMesh);
 
-      // Inner ring (hole)
-      const innerHoleRadius = 0.22;
-      const ringGeom = new THREE.CylinderGeometry(innerHoleRadius, innerHoleRadius, THICKNESS + 0.006, 64);
-      const ringMat = new THREE.MeshStandardMaterial({ color: 0x888b8f, metalness: 1.0, roughness: 0.25 });
-      const ringMesh = new THREE.Mesh(ringGeom, ringMat);
-      ringMesh.rotation.x = Math.PI / 2;
-      scene.add(ringMesh);
+      // Edge (side) — use an open cylinder for only the side
+      const edgeGeom = new THREE.CylinderGeometry(RADIUS, RADIUS, THICKNESS + 0.002, 256, 1, true);
+      const edgeMat = new THREE.MeshStandardMaterial({
+        color: 0x555555,
+        metalness: 0.25,
+        roughness: 0.7
+      });
+      const edgeMesh = new THREE.Mesh(edgeGeom, edgeMat);
+      edgeMesh.rotation.x = Math.PI / 2;
+      edgeMesh.castShadow = true;
+      edgeMesh.receiveShadow = true;
+      scene.add(edgeMesh);
 
-      // Animation
+
+      // small subtle ground to catch light — invisible but improves shadow sampling (not visible in final)
+      // (we won't add a ground plane to keep background clean)
+
+      // Animation loop
       function animate() {
         requestAnimationFrame(animate);
+        // clamp rotationX to avoid flipping too far
+        rotationX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotationX));
         cdMesh.rotation.x = rotationX;
         cdMesh.rotation.y = rotationY;
+        edgeMesh.rotation.x = cdMesh.rotation.x;
+        edgeMesh.rotation.y = cdMesh.rotation.y;
         renderer.render(scene, camera);
       }
       animate();
@@ -125,7 +219,8 @@
         camera.updateProjectionMatrix();
         renderer.setSize(container.clientWidth, container.clientHeight);
       });
-    }
+
+    } // end initScene
   </script>
 </body>
 </html>
