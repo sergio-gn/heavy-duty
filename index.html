@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>Disco 3D - Heavy Duty (rotacionável)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    html,body { height:100%; margin:0; background:#111; }
+    #container { width:100%; height:100vh; overflow:hidden; }
+    .hint {
+      position: absolute; top:12px; left:12px; color:#fff; font-family:Arial,Helvetica,sans-serif;
+      background: rgba(0,0,0,0.4); padding:8px 10px; border-radius:6px; font-size:13px;
+    }
+  </style>
+</head>
+<body>
+  <div id="container"></div>
+  <div class="hint">Clique e arraste para girar • Scroll para dar zoom</div>
+
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.152.2/build/three.module.js';
+    import { OrbitControls } from 'https://unpkg.com/three@0.152.2/examples/jsm/controls/OrbitControls.js';
+
+    const container = document.getElementById('container');
+
+    // Cena, câmera e renderer
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0b0b0b);
+
+    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+    camera.position.set(0, 1.2, 2.8);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    // Luzes
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.6));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+    dir.position.set(2, 4, 1);
+    scene.add(dir);
+
+    // Controles
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.minDistance = 1.2;
+    controls.maxDistance = 6;
+
+    // Textura
+    const textureLoader = new THREE.TextureLoader();
+    const texture = textureLoader.load('DISCO_08_01.png');
+    texture.flipY = false;
+
+    const RADIUS = 1.0;
+    const THICKNESS = 0.05;
+
+    // Face frontal
+    const frontGeom = new THREE.CircleGeometry(RADIUS, 128);
+    const frontMat = new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide });
+    const frontMesh = new THREE.Mesh(frontGeom, frontMat);
+    frontMesh.rotation.x = -Math.PI / 2;
+    frontMesh.position.y = THICKNESS / 2;
+    scene.add(frontMesh);
+
+    // Face traseira (mesma textura, mas invertida)
+    const backGeom = new THREE.CircleGeometry(RADIUS, 128);
+    const backMat = new THREE.MeshStandardMaterial({ map: texture, side: THREE.DoubleSide });
+    const backMesh = new THREE.Mesh(backGeom, backMat);
+    backMesh.rotation.x = Math.PI / 2;
+    backMesh.position.y = -THICKNESS / 2;
+    scene.add(backMesh);
+
+    // Borda
+    const edgeGeom = new THREE.CylinderGeometry(RADIUS, RADIUS, THICKNESS, 128, 1, true);
+    const edgeMat = new THREE.MeshStandardMaterial({ color: 0x555555, metalness: 0.2, roughness: 0.8 });
+    const edgeMesh = new THREE.Mesh(edgeGeom, edgeMat);
+    edgeMesh.rotation.x = Math.PI / 2;
+    scene.add(edgeMesh);
+
+    // Aro metálico interno
+    const innerHoleRadius = 0.22;
+    const ringGeom = new THREE.CylinderGeometry(innerHoleRadius, innerHoleRadius, THICKNESS + 0.006, 64);
+    const ringMat = new THREE.MeshStandardMaterial({ color: 0x888b8f, metalness: 1.0, roughness: 0.25 });
+    const ringMesh = new THREE.Mesh(ringGeom, ringMat);
+    ringMesh.rotation.x = Math.PI / 2;
+    scene.add(ringMesh);
+
+    // Animação
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    // Responsividade
+    window.addEventListener('resize', () => {
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+  </script>
+</body>
+</html>
